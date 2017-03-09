@@ -1,0 +1,21 @@
+# Eclipse
+.settings/
+.project
+.cproject
+
+# Windows image file caches
+Thumbs.db
+ehthumbs.db
+
+# Folder config file
+Desktop.ini
+
+# Recycle Bin used on file shares
+$RECYCLE.BIN/
+
+# Windows shortcuts
+*.lnk
+
+# C/C++ compiler target directories
+Debug/
+Release/
