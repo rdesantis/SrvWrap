@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Ronald DeSantis
+ * Copyright (c) 2016, 2017, Ronald DeSantis
  *
  *	Licensed under the Apache License, Version 2.0 (the "License");
  *	you may not use this file except in compliance with the License.
@@ -24,9 +24,9 @@
  *
  * It is expected that the service will be installed using SC.exe invoked from a Windows .bat file as follows.
  * Note the extravagant use of quotes.  This is not a typo; .bat files are insane about quotes.
- * The quotes can be omitted only if the indicated value consists of only a single token.
+ * The triple double quotes can be omitted if the indicated value does not contain embedded blanks.
  *
- *		sc create %SVC_NAME% binPath="%WRAPPER_EXE% %SVC_NAME% %WRAPPED_EXE% """%CMD_LINE%""""
+ *		sc create %SVC_NAME% binPath="%WRAPPER_EXE% %SVC_NAME% """%SVC_CONFIG%""""
  *
  * where:
  *
@@ -36,32 +36,71 @@
  * 					If directory of the wrapper executable is not defined on the PATH,
  * 					then %WRAPPER_EXE% must be fully-qualified with the directory.
  *
- *	%WRAPPED_EXE%	optionally is the path to the executable to be wrapped ending with an
+ * 	%SVC_CONFIG%	is the path to a text file containing configuration details for the service.
+ * 					This file must contain a name=value configuration parameter on each line.
+ *					The configuration parameters are as follows.
+ *
+ *		ApplicationName
+ *					optionally is the path to the executable to be wrapped ending with an
  *					explicit file extension, typically .exe or .cmd.  The PATH is not searched
- *					when launching this executable.  Therefore, %WRAPPED_EXE% must be
+ *					when launching this executable.  Therefore, ApplicationName must be
  * 					fully-qualified with a directory unless the executable is located in
  * 					the directory where the Service Control Manager starts new services,
  * 					typically %WinDir%\System32 or %WinDir%\SysWOW64.
  *
- * 					This value can be omitted.  See %CMD_LINE% for details.
+ * 					This value can be omitted.  See CommandLine for details.
  *
- * 	%CMD_LINE%		is the command line to be wrapped including any arguments to the wrapped
+ * 		CommandLine
+ * 					is the command line to be wrapped including any arguments to the wrapped
  * 					executable.
  *
- * 					If %WRAPPED_EXE% was omitted, the first token of the command line
+ * 					If ApplicationName was omitted, the first token of the command line
  * 					must be the executable to be wrapped.  In this case, the normal Windows
  * 					rules for locating an executable are following, including searching the
  * 					PATH and in some cases providing an implicit file extension if one
  * 					was omitted.
  *
- * 					If %WRAPPED_EXE% was provided, the first token of the command line can
+ * 					If ApplicationName was provided, the first token of the command line can
  * 					be any arbitrary value.  Arguments always start at the second token.
  *
- * 					To wrap a Windows batch file, set %CMD_LINE% to "cmd.exe /c" plus
+ * 					To wrap a Windows batch file, set CommandLine to "cmd.exe /c" plus
  * 					the name of the batch file followed by any arguments.
  *
- * %WRAPPED_EXE% and %CMD_LINE% are passed to the Windows CreateProcess() API as the
- * lpApplicationName and lpCommandLine arguments respectively.
+ *		CurrentDirectory
+ *					is the full path to the current directory for the service.
+ *					If omitted, this defaults to the current directory of the
+ *					Service Control Manager when it starts the new service.
+ *
+ *		Environment
+ *					specifies how to construct the environment block for the service.
+ *					It must be a string in the following format:
+ *
+ *						source[:path]
+ *
+ *					where:
+ *
+ *					source	is one of the following:
+ *
+ *							default		The environment is inherited unchanged from the
+ *										Service Control Manager
+ *
+ *							file		A set of name=value environment variables
+ *										contained in the file specified by the
+ *										path argument is used to update the environment.
+ *
+ *							inline		The remainder of this configuration file contains
+ *										name=value environment variables used to
+ *										update the environment.
+ *
+ *					path
+ *							must be specified when source is file.
+ *
+ *					If Environment is omitted, default mode is used.
+ *
+ * The configuration parameters specify arguments to be passed to the Windows API
+ * CreateProcess() when launching the wrapped program.  See
+ * https://msdn.microsoft.com/en-us/library/windows/desktop/ms682425(v=vs.85).aspx
+ * for more details.
  *
  * Any fatal error encountered by the service writes an event to the Windows Application event log with
  * the source set to SrvWrap.  The first string reported with the event is typically the service name.
@@ -82,12 +121,13 @@
 #include <tchar.h>
 #include <stdio.h>
 
+#include "SrvConfig.h"
+
 static const char eventSourceName[] = "SrvWrap";
 static const DWORD waitSecondsBeforeKill = 30;
 
 static LPSTR lpServiceName = NULL;
-static LPCTSTR lpApplicationName;
-static LPSTR lpCommandLine;
+static LPSTR lpConfigName = NULL;
 
 SERVICE_STATUS          gSvcStatus;
 SERVICE_STATUS_HANDLE   gSvcStatusHandle;
@@ -108,14 +148,11 @@ static void LogError(LPTSTR, BOOL);
  * argc and argv must be set as follows, which will be the case if the above service installation
  * convention is observed:
  *
- * 	argc			must be 3 or 4.
+ * 	argc			must be 3.
  *
- * 	argv[1]			must contain the service name used when the service was installed.
+ * 	argv[1]			is the service name used when the service was installed.
  *
- * 	argv[2]			if argc is 3, must contain the command line to invoke the wrapped executable;
- *					if argc is 4, must contain the path to the wrapped executable.
- *
- * 	argv[3]			if argc is 4, must contain the command line to invoke the wrapped executable.
+ * 	argv[2]			is the path to a text file containing configuration details for the service.
  */
 int main(int argc, char* argv[])
 {
@@ -125,20 +162,13 @@ int main(int argc, char* argv[])
 
 	LogArgs(argc, argv);
 
-	if (argc != 3 && argc != 4) {
+	if (argc != 3) {
 		SetLastError(ERROR_BAD_ARGUMENTS);
 		LogError(TEXT("main"), FALSE);
 		return EXIT_FAILURE;
 	}
 
-	if (argc == 3) {
-		lpApplicationName = NULL;
-		lpCommandLine = argv[2];
-	}
-	else {
-		lpApplicationName = argv[2];
-		lpCommandLine = argv[3];
-	}
+	lpConfigName = argv[2];
 
 	// Hand off to the service control dispatcher.
 	// It returns when the service has stopped.
@@ -220,7 +250,18 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
 		return;
     }
 
-	// Launch the wrapped executable.
+    // Get the service configuration.
+
+    SRV_CONFIG srvConfig;
+
+    bSuccess = GetSrvConfig(lpConfigName, &srvConfig);
+
+    if (!bSuccess) {
+		LogError(TEXT("GetSrvConfig"), TRUE);
+		return;
+    }
+
+    // Launch the wrapped executable.
 
     DWORD dwCreationFlags = 0;		// Do NOT use CREATE_NO_WINDOW; that suppresses the ability to send console signals
 
@@ -236,16 +277,16 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
     ZeroMemory(&pi, sizeof(pi));
 
     bSuccess = CreateProcess(
-					lpApplicationName,	// lpApplicationName
-					lpCommandLine,		// lpCommandLine
-					NULL,				// lpProcessAttributes
-					NULL,				// lpThreadAttributes
-					TRUE,				// bInheritHandles
-					dwCreationFlags,	// dwCreationFlags
-					NULL,				// lpEnvironment
-					NULL,				// lpCurrentDirectory
-					&si,				// lpStartupInfo
-					&pi);				// lpProcessInformation
+    				srvConfig.lpApplicationName,
+					srvConfig.lpCommandLine,
+					NULL,						// lpProcessAttributes
+					NULL,						// lpThreadAttributes
+					TRUE,						// bInheritHandles
+					dwCreationFlags,			// dwCreationFlags
+					srvConfig.lpEnvironment,
+					srvConfig.lpCurrentDirectory,
+					&si,						// lpStartupInfo
+					&pi);						// lpProcessInformation
 
     if (!bSuccess) {
 		LogError(TEXT("CreateProcess"), TRUE);
@@ -287,35 +328,6 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
 			LogError(TEXT("GenerateConsoleCtrlEvent"), TRUE);
 			return;
 		}
-
-#ifdef CAN_SATISFY_BACTH_TERMINATE_PROMPT
-		// If a Windows batch file was wrapped, it prompts "Terminate batch job (Y/N)?"
-		// upon receiving the CTRL + C signal.  Type "Y" to the console to satisfy
-		// the prompt.
-
-		// This following didn't work.  Writing "Y" to si.hStdInput didn't work either.
-
-		HANDLE hConsole = CreateFile(
-								"CONIN$",
-								GENERIC_WRITE,
-								FILE_SHARE_READ | FILE_SHARE_WRITE,
-								NULL,
-								OPEN_EXISTING,
-								FILE_ATTRIBUTE_NORMAL,
-								NULL);
-
-		INPUT_RECORD ir;
-		ir.EventType = KEY_EVENT;
-		ir.Event.KeyEvent.bKeyDown = TRUE;
-		ir.Event.KeyEvent.wRepeatCount = 1;
-		ir.Event.KeyEvent.wVirtualKeyCode = 0x59;
-		ir.Event.KeyEvent.wVirtualScanCode = 0;
-		ir.Event.KeyEvent.uChar.AsciiChar = 'Y';
-		ir.Event.KeyEvent.dwControlKeyState = SHIFT_PRESSED;
-
-		DWORD numberOfEventsWritten;
-		WriteConsoleInput(hConsole, &ir, 1, &numberOfEventsWritten);
-#endif
 
 		// Wait for the child process to terminate.
 
