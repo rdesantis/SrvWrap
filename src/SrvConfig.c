@@ -21,17 +21,20 @@
 
 #include "SrvConfig.h"
 
-static BOOL GetSrvEnvironment(
-		char* pSource,
-		FILE* inlineFile,
-		LPVOID* plpEnvironment);
+static BOOL GetSrvEnvironment(char*, FILE*, LPVOID*);
 
-/**
- * Read the service configuration file.
- */
-BOOL GetSrvConfig(
-		LPSTR lpConfigName,
-		LPSRV_CONFIG lpSrvConfig) {
+LPSRV_CONFIG GetSrvConfig(LPSTR lpConfigName) {
+
+	HANDLE hHeap = GetProcessHeap();
+	if (hHeap == NULL) {
+		return NULL;
+	}
+
+	LPSRV_CONFIG lpSrvConfig = HeapAlloc(hHeap, 0, sizeof(*lpSrvConfig));
+	if (lpSrvConfig == NULL) {
+		SetLastError(ERROR_OUTOFMEMORY);
+		return NULL;
+	}
 
 	lpSrvConfig->lpApplicationName = NULL;
 	lpSrvConfig->lpCommandLine = NULL;
@@ -43,81 +46,111 @@ BOOL GetSrvConfig(
 	FILE* file = fopen(lpConfigName, "r");
 	if (file == NULL) {
 		SetLastError(ERROR_FILE_NOT_FOUND);
-		return FALSE;
+		return ReleaseSrvConfig(lpSrvConfig);
 	}
 
-	char line[256];
-    while (fgets(line, sizeof(line), file)) {
+	const int MAX_LINE_LENGTH = 256;
+	char line[MAX_LINE_LENGTH];
+	while (fgets(line, sizeof(line), file)) {
 
-    	// Expecting line with "keyword=value\n\0".
-    	// Replace "=" and "\n" with 0 terminators.
-    	// Ignore empty lines.
+		// Expecting line with "keyword=value\n\0".
+		// Replace "=" and "\n" with 0 terminators.
+		// Ignore empty lines.
 
-    	char* pNewline = strchr(line, '\n');
-    	if (pNewline != NULL) {
-    		*pNewline = 0;
-    	}
+		char* pNewline = strchr(line, '\n');
+		if (pNewline != NULL) {
+			*pNewline = 0;
+		}
 
-    	if (line[0] == 0) {
-    		continue;
-    	}
+		if (line[0] == 0) {
+			continue;
+		}
 
-    	char* pEquals = strchr(line, '=');
-    	if (pEquals == NULL) {
+		char* pEquals = strchr(line, '=');
+		if (pEquals == NULL) {
 			SetLastError(ERROR_BAD_FORMAT);
-			return FALSE;
-    	}
-    	*pEquals = 0;
+			return ReleaseSrvConfig(lpSrvConfig);
+		}
+		*pEquals = 0;
 
-    	char* pKeyword = line;
-    	char* pValue = pEquals + 1;
+		char* pKeyword = line;
+		char* pValue = pEquals + 1;
 
-    	// Check for keyword with simple value.
+		// Check for keyword with simple value.
 
-    	LPTSTR* pField = NULL;
-    	if (strcmp(pKeyword, "ApplicationName") == 0) {
-    		pField = (LPTSTR*)&lpSrvConfig->lpApplicationName;
-    	}
-    	else if (strcmp(pKeyword, "CommandLine") == 0) {
-    		pField = &lpSrvConfig->lpCommandLine;
-    	}
-    	else if (strcmp(pKeyword, "CurrentDirectory") == 0) {
-    		pField = (LPTSTR*)&lpSrvConfig->lpCurrentDirectory;
-    	}
+		LPTSTR* pField = NULL;
+		if (strcmp(pKeyword, "ApplicationName") == 0) {
+			pField = (LPTSTR*)&lpSrvConfig->lpApplicationName;
+		}
+		else if (strcmp(pKeyword, "CommandLine") == 0) {
+			pField = &lpSrvConfig->lpCommandLine;
+		}
+		else if (strcmp(pKeyword, "CurrentDirectory") == 0) {
+			pField = (LPTSTR*)&lpSrvConfig->lpCurrentDirectory;
+		}
 
-    	if (pField != NULL) {
+		if (pField != NULL) {
 
-    		*pField = malloc(256);
-    		if (*pField == NULL) {
-    			SetLastError(ERROR_OUTOFMEMORY);
-    			return FALSE;
-    		}
+			*pField = HeapAlloc(hHeap, 0, sizeof MAX_LINE_LENGTH);
+			if (*pField == NULL) {
+				SetLastError(ERROR_OUTOFMEMORY);
+				return ReleaseSrvConfig(lpSrvConfig);
+			}
 
-    		strcpy(*pField, pValue);
-    	}
-    	else if (strcmp(pKeyword, "Environment") == 0) {
+			strcpy(*pField, pValue);
+		}
+		else if (strcmp(pKeyword, "Environment") == 0) {
 
-    		// Environment keyword requires complex handling.
+			// Environment keyword requires complex handling.
 
-    		BOOL bSuccess = GetSrvEnvironment(pValue, file, &lpSrvConfig->lpEnvironment);
+			BOOL bSuccess = GetSrvEnvironment(pValue, file, &lpSrvConfig->lpEnvironment);
 
-    		if (!bSuccess) {
-    			return FALSE;
-    		}
-    	}
-    	else {
+			if (!bSuccess) {
+				return ReleaseSrvConfig(lpSrvConfig);
+			}
+		}
+		else {
 			SetLastError(ERROR_BAD_FORMAT);
-			return FALSE;
-    	}
-    }
+			return ReleaseSrvConfig(lpSrvConfig);
+		}
+	}
 
-    if (feof(file) == 0) {
+	if (feof(file) == 0) {
 		SetLastError(ERROR_READ_FAULT);
-		return FALSE;
-    }
+		return ReleaseSrvConfig(lpSrvConfig);
+	}
 
-    fclose(file);
-	return TRUE;
+	fclose(file);
+
+	return lpSrvConfig;
+}
+
+LPSRV_CONFIG ReleaseSrvConfig(LPSRV_CONFIG lpSrvConfig) {
+
+	HANDLE hHeap = GetProcessHeap();
+	if (hHeap == NULL) {
+		return NULL;
+	}
+
+	if (lpSrvConfig == NULL) {
+		return NULL;
+	}
+
+	if (lpSrvConfig->lpApplicationName != NULL) {
+		HeapFree(hHeap, 0, (LPTSTR)lpSrvConfig->lpApplicationName);
+	}
+	if (lpSrvConfig->lpCommandLine != NULL) {
+		HeapFree(hHeap, 0, lpSrvConfig->lpCommandLine);
+	}
+	if (lpSrvConfig->lpCurrentDirectory != NULL) {
+		HeapFree(hHeap, 0, (LPTSTR)lpSrvConfig->lpCurrentDirectory);
+	}
+	if (lpSrvConfig->lpEnvironment != NULL) {
+		HeapFree(hHeap, 0, lpSrvConfig->lpEnvironment);
+	}
+
+	HeapFree(hHeap, 0, lpSrvConfig);
+	return NULL;
 }
 
 /**
@@ -154,28 +187,28 @@ static BOOL GetSrvEnvironment(
 		file = inlineFile;
 	}
 	else {
-    	char* pColon = strchr(pSource, ':');
-    	if (pColon == NULL) {
+		char* pColon = strchr(pSource, ':');
+		if (pColon == NULL) {
 			SetLastError(ERROR_BAD_FORMAT);
 			return FALSE;
-    	}
-    	*pColon = 0;
+		}
+		*pColon = 0;
 
-    	char* pKeyword = pSource;
-    	char* pPath = pColon + 1;
+		char* pKeyword = pSource;
+		char* pPath = pColon + 1;
 
-    	if (strcmp(pKeyword, "file") == 0) {
+		if (strcmp(pKeyword, "file") == 0) {
 
-    		file = fopen(pPath, "r");
-    		if (file == NULL) {
-    			SetLastError(ERROR_FILE_NOT_FOUND);
-    			return FALSE;
-    		}
-    	}
-    	else {
+			file = fopen(pPath, "r");
+			if (file == NULL) {
+				SetLastError(ERROR_FILE_NOT_FOUND);
+				return FALSE;
+			}
+		}
+		else {
 			SetLastError(ERROR_BAD_FORMAT);
 			return FALSE;
-    	}
+		}
 	}
 
 	// Loop reading and setting environment variables.
@@ -183,47 +216,47 @@ static BOOL GetSrvEnvironment(
 	BOOL bSuccess = TRUE;
 
 	char line[256];
-    while (fgets(line, sizeof(line), file)) {
+	while (fgets(line, sizeof(line), file)) {
 
-    	// Expecting line with "keyword=value\n\0".
-    	// Replace "=" and "\n" with 0 terminators.
-    	// Ignore empty lines.
+		// Expecting line with "keyword=value\n\0".
+		// Replace "=" and "\n" with 0 terminators.
+		// Ignore empty lines.
 
-    	char* pNewline = strchr(line, '\n');
-    	if (pNewline != NULL) {
-    		*pNewline = 0;
-    	}
+		char* pNewline = strchr(line, '\n');
+		if (pNewline != NULL) {
+			*pNewline = 0;
+		}
 
-    	if (line[0] == 0) {
-    		continue;
-    	}
+		if (line[0] == 0) {
+			continue;
+		}
 
-    	char* pEquals = strchr(line, '=');
-    	if (pEquals == NULL) {
+		char* pEquals = strchr(line, '=');
+		if (pEquals == NULL) {
 			SetLastError(ERROR_BAD_FORMAT);
 			return FALSE;
-    	}
-    	*pEquals = 0;
+		}
+		*pEquals = 0;
 
-    	char* pName = line;
-    	char* pValue = pEquals + 1;
+		char* pName = line;
+		char* pValue = pEquals + 1;
 
-    	// Set environment variable.
+		// Set environment variable.
 
-    	bSuccess = SetEnvironmentVariable(pName, pValue);
-    	if (!bSuccess) {
-    		break;
-    	}
-    }
+		bSuccess = SetEnvironmentVariable(pName, pValue);
+		if (!bSuccess) {
+			break;
+		}
+	}
 
-    if (feof(file) == 0) {
+	if (feof(file) == 0) {
 		SetLastError(ERROR_READ_FAULT);
 		return FALSE;
-    }
+	}
 
 	if (file != inlineFile) {
 		fclose(file);
 	}
 
-    return bSuccess;
+	return bSuccess;
 }

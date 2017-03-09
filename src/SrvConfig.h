@@ -27,12 +27,19 @@ typedef struct tagSRV_CONFIG {
 } SRV_CONFIG,*LPSRV_CONFIG;
 
 /**
- * Read the service configuration file.
+ * Allocate a service configuration block
+ * and initialize it from the service configuration file.
+ *
+ * Returns pointer to the block.
  */
-BOOL GetSrvConfig(
-		LPSTR lpConfigName,
-		LPSRV_CONFIG lpSrvConfig);
+LPSRV_CONFIG GetSrvConfig(LPSTR lpConfigName);
 
-void ReleaseSrvConfig(LPSRV_CONFIG lpSrvConfig);
+/**
+ * Release the service configuration block
+ * allocated by GetSrvConfig().
+ *
+ * Always returns NULL.
+ */
+LPSRV_CONFIG ReleaseSrvConfig(LPSRV_CONFIG lpSrvConfig);
 
 #endif /* SRVCONFIG_H_ */

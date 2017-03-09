@@ -129,9 +129,9 @@ static const DWORD waitSecondsBeforeKill = 30;
 static LPSTR lpServiceName = NULL;
 static LPSTR lpConfigName = NULL;
 
-SERVICE_STATUS          gSvcStatus;
+SERVICE_STATUS		  	gSvcStatus;
 SERVICE_STATUS_HANDLE   gSvcStatusHandle;
-HANDLE                  ghSvcStopEvent = NULL;
+HANDLE				  	ghSvcStopEvent = NULL;
 
 VOID WINAPI SvcCtrlHandler( DWORD );
 VOID WINAPI SvcMain(DWORD, LPTSTR*);
@@ -195,17 +195,17 @@ int main(int argc, char* argv[])
 // Parameters:
 //   dwArgc - Number of arguments in the lpszArgv array
 //   lpszArgv - Array of strings. The first string is the name of
-//     the service and subsequent strings are passed by the process
-//     that called the StartService function to start the service.
+//	 the service and subsequent strings are passed by the process
+//	 that called the StartService function to start the service.
 //
 // Return value:
 //   None.
 //
 VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
 {
-    BOOL bSuccess;
+	BOOL bSuccess;
 
-    // Register the handler function for the service.
+	// Register the handler function for the service.
 
 	gSvcStatusHandle = RegisterServiceCtrlHandler(
 			lpServiceName,
@@ -229,10 +229,10 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
 	// signals this event when it receives the stop control code.
 
 	ghSvcStopEvent = CreateEvent(
-							NULL,    // default security attributes
-							TRUE,    // manual reset event
-							FALSE,   // not signaled
-							NULL);   // no name
+			NULL,	// default security attributes
+			TRUE,	// manual reset event
+			FALSE,   // not signaled
+			NULL);   // no name
 
 	if (ghSvcStopEvent == NULL) {
 		LogError(TEXT("CreateEvent"), TRUE);
@@ -243,55 +243,53 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
 	// Allocate a console so that CTRL_C_EVENT can be sent to
 	// signal the child process to terminate cleanly.
 
-    bSuccess = AllocConsole();
+	bSuccess = AllocConsole();
 
-    if (!bSuccess) {
+	if (!bSuccess) {
 		LogError(TEXT("AllocConsole"), TRUE);
 		return;
-    }
+	}
 
-    // Get the service configuration.
+	// Get the service configuration.
 
-    SRV_CONFIG srvConfig;
+	LPSRV_CONFIG lpSrvConfig = GetSrvConfig(lpConfigName);
 
-    bSuccess = GetSrvConfig(lpConfigName, &srvConfig);
-
-    if (!bSuccess) {
+	if (lpSrvConfig == NULL) {
 		LogError(TEXT("GetSrvConfig"), TRUE);
 		return;
-    }
+	}
 
-    // Launch the wrapped executable.
+	// Launch the wrapped executable.
 
-    DWORD dwCreationFlags = 0;		// Do NOT use CREATE_NO_WINDOW; that suppresses the ability to send console signals
+	DWORD dwCreationFlags = 0;		// Do NOT use CREATE_NO_WINDOW; that suppresses the ability to send console signals
 
-    STARTUPINFO si;
-    ZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
+	STARTUPINFO si;
+	ZeroMemory(&si, sizeof(si));
+	si.cb = sizeof(si);
+	si.dwFlags = STARTF_USESTDHANDLES;
 	si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
 	si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
 	si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
 
-    PROCESS_INFORMATION pi;
-    ZeroMemory(&pi, sizeof(pi));
+	PROCESS_INFORMATION pi;
+	ZeroMemory(&pi, sizeof(pi));
 
-    bSuccess = CreateProcess(
-    				srvConfig.lpApplicationName,
-					srvConfig.lpCommandLine,
-					NULL,						// lpProcessAttributes
-					NULL,						// lpThreadAttributes
-					TRUE,						// bInheritHandles
-					dwCreationFlags,			// dwCreationFlags
-					srvConfig.lpEnvironment,
-					srvConfig.lpCurrentDirectory,
-					&si,						// lpStartupInfo
-					&pi);						// lpProcessInformation
+	bSuccess = CreateProcess(
+			lpSrvConfig->lpApplicationName,
+			lpSrvConfig->lpCommandLine,
+			NULL,							// lpProcessAttributes
+			NULL,							// lpThreadAttributes
+			TRUE,							// bInheritHandles
+			dwCreationFlags,				// dwCreationFlags
+			lpSrvConfig->lpEnvironment,
+			lpSrvConfig->lpCurrentDirectory,
+			&si,							// lpStartupInfo
+			&pi);							// lpProcessInformation
 
-    if (!bSuccess) {
+	if (!bSuccess) {
 		LogError(TEXT("CreateProcess"), TRUE);
 		return;
-    }
+	}
 
 	// Report running status when initialization is complete.
 
@@ -299,13 +297,13 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
 
 	// Wait until: the service is signaled to stop; or, the child process terminates.
 
-    HANDLE waitForHandles[] = {ghSvcStopEvent, pi.hProcess};
+	HANDLE waitForHandles[] = {ghSvcStopEvent, pi.hProcess};
 
 	DWORD waitResult = WaitForMultipleObjects(
-							2,					// nCount
-							waitForHandles,		// lpHandles
-							FALSE,				// bWaitAll
-							INFINITE);			// dwMilliseconds
+			2,					// nCount
+			waitForHandles,		// lpHandles
+			FALSE,				// bWaitAll
+			INFINITE);			// dwMilliseconds
 
 	if (waitResult == WAIT_OBJECT_0) {
 
@@ -393,6 +391,8 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
 	CloseHandle(pi.hProcess);
 	CloseHandle(pi.hThread);
 
+	ReleaseSrvConfig(lpSrvConfig);
+
 	ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
 	return;
 }
@@ -405,7 +405,7 @@ VOID WINAPI SvcMain(DWORD dwArgc, LPTSTR *lpszArgv)
 //   dwCurrentState - The current state (see SERVICE_STATUS)
 //   dwWin32ExitCode - The system error code
 //   dwWaitHint - Estimated time for pending operation,
-//     in milliseconds
+//	 in milliseconds
 //
 // Return value:
 //   None
@@ -489,23 +489,23 @@ VOID WINAPI SvcCtrlHandler(DWORD dwCtrl)
  */
 static void LogArgs(int argc, char* argv[])
 {
-    HANDLE hEventSource = RegisterEventSource(NULL, eventSourceName);
+	HANDLE hEventSource = RegisterEventSource(NULL, eventSourceName);
 
-    if (NULL != hEventSource) {
+	if (NULL != hEventSource) {
 
-            ReportEvent(
-            		hEventSource,				// event log handle
-    				EVENTLOG_INFORMATION_TYPE,	// event type
-    				0,							// event category
-    				SVC_INFORMATION,			// event identifier
-    				NULL,						// no security identifier
-    				argc,						// size of lpszStrings array
-    				0,							// no binary data
-    				(LPCSTR*)argv,				// array of strings
-    				NULL);						// no binary data
+		ReportEvent(
+				hEventSource,				// event log handle
+				EVENTLOG_INFORMATION_TYPE,	// event type
+				0,							// event category
+				SVC_INFORMATION,			// event identifier
+				NULL,						// no security identifier
+				argc,						// size of lpszStrings array
+				0,							// no binary data
+				(LPCSTR*)argv,				// array of strings
+				NULL);						// no binary data
 
-        DeregisterEventSource(hEventSource);
-    }
+		DeregisterEventSource(hEventSource);
+	}
 }
 
 /**
@@ -513,15 +513,15 @@ static void LogArgs(int argc, char* argv[])
  */
 static void LogInfo(LPTSTR info) {
 
-    HANDLE hEventSource = RegisterEventSource(NULL, eventSourceName);
+	HANDLE hEventSource = RegisterEventSource(NULL, eventSourceName);
 
-    if (NULL != hEventSource) {
+	if (NULL != hEventSource) {
 
-        LPCTSTR lpszStrings[2];
-        lpszStrings[0] = lpServiceName;
-        lpszStrings[1] = info;
+		LPCTSTR lpszStrings[2];
+		lpszStrings[0] = lpServiceName;
+		lpszStrings[1] = info;
 
-        ReportEvent(
+		ReportEvent(
 				hEventSource,				// event log handle
 				EVENTLOG_INFORMATION_TYPE,	// event type
 				0,							// event category
@@ -532,8 +532,8 @@ static void LogInfo(LPTSTR info) {
 				lpszStrings,				// array of strings
 				NULL);						// no binary data
 
-        DeregisterEventSource(hEventSource);
-    }
+		DeregisterEventSource(hEventSource);
+	}
 }
 
 /**
@@ -546,21 +546,21 @@ static void LogInfo(LPTSTR info) {
  */
 static void LogError(LPTSTR szFunction, BOOL bReportStopping)
 {
-    DWORD dwLastError = GetLastError();
+	DWORD dwLastError = GetLastError();
 
-    HANDLE hEventSource = RegisterEventSource(NULL, eventSourceName);
+	HANDLE hEventSource = RegisterEventSource(NULL, eventSourceName);
 
-    if (NULL != hEventSource) {
+	if (NULL != hEventSource) {
 
-    	TCHAR message[80];
-        sprintf_s(message, 80, TEXT("%s failed with error %d hex %#X"), szFunction, dwLastError, dwLastError);
+		TCHAR message[80];
+		sprintf_s(message, 80, TEXT("%s failed with error %d hex %#X"), szFunction, dwLastError, dwLastError);
 
-        LPCTSTR lpszStrings[2];
-        lpszStrings[0] = lpServiceName;
-        lpszStrings[1] = message;
+		LPCTSTR lpszStrings[2];
+		lpszStrings[0] = lpServiceName;
+		lpszStrings[1] = message;
 
-        ReportEvent(
-        		hEventSource,				// event log handle
+		ReportEvent(
+				hEventSource,				// event log handle
 				EVENTLOG_ERROR_TYPE,		// event type
 				0,							// event category
 				SVC_ERROR,					// event identifier
@@ -570,10 +570,10 @@ static void LogError(LPTSTR szFunction, BOOL bReportStopping)
 				lpszStrings,				// array of strings
 				NULL);						// no binary data
 
-        DeregisterEventSource(hEventSource);
-    }
+		DeregisterEventSource(hEventSource);
+	}
 
-    if (bReportStopping) {
+	if (bReportStopping) {
 		ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
-    }
+	}
 }
