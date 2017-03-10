@@ -91,7 +91,7 @@ LPSRV_CONFIG GetSrvConfig(LPSTR lpConfigName) {
 
 		if (pField != NULL) {
 
-			*pField = HeapAlloc(hHeap, 0, sizeof MAX_LINE_LENGTH);
+			*pField = HeapAlloc(hHeap, 0, MAX_LINE_LENGTH);
 			if (*pField == NULL) {
 				SetLastError(ERROR_OUTOFMEMORY);
 				return ReleaseSrvConfig(lpSrvConfig);
