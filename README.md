@@ -14,3 +14,5 @@ This is a replacement for the old SrvAny.exe, equally simple but much more polis
 - Starting the service starts program execution
 - If the program terminates itself, the service moves from Running status to Stopped status
 - Stopping the service cleanly terminates program execution
+
+See src/SrvWrap.c for usage.
